@@ -1,0 +1,84 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <time.h>
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/stat.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+
+#include "../sockwrap.h"
+#include "../errlib.h"
+#include "../receive.h"
+
+#define BUFF_LENGTH 1500
+#define QUIT_MSG "QUIT\r\n"
+#define OK_MSG "+OK\r\n"
+#define ERR_MSG "-ERR\r\n"
+
+char *prog_name;
+
+int main (int argc, char *argv[])
+{
+	int socket, i, read_char;
+	struct sockaddr_in server;
+	char buf[BUFF_LENGTH], c;
+	char* buffer;
+
+	prog_name = argv[0];
+
+	if(argc < 4){
+		printf("Number of params is incorrect. Usage: %s <dest_ip_address> <dest_port> <file_names>\n", prog_name);
+		return -1;
+	}
+
+	socket = Socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+	estabilish_connection_client(socket, argv[1], argv[2]);
+	printf("Number of files requested: %d\n", argc-3);
+
+	for(i=3; i<argc; i++){
+		// 6 + 1(for terminator) = 7
+		memset(buf, 0, BUFF_LENGTH);
+
+		buffer = malloc((7+strlen(argv[i]))*sizeof(char));
+		sprintf(buffer, "GET %s\r\n", argv[i]);
+		//Write(socket, buffer, strlen(buffer));
+		if(write(socket, buffer, strlen(buffer)) != strlen(buffer)) return -1;
+
+		free(buffer);
+		read_char = 0;
+		c = ' ';
+		while(c != '\n'){
+			//Read(socket, &c, 1);
+			if(read(socket, &c, 1) != 1) return -1;
+			buf[read_char++] = c;
+		}
+
+		printf("\n-- Message received: %s", buf);
+		if(strncmp(buf, OK_MSG, strlen(OK_MSG)) == 0){
+			if(receive_file_from_server(socket, argv[i]) < 0){
+				printf("Error during file downloading\n");
+				Close(socket);
+				return -1;
+			} else printf("File successfully received\n");
+		} else if(strncmp(buf, ERR_MSG, strlen(ERR_MSG)) == 0){
+			printf("-ERR_MSG received, closing connection..\n\n");
+			return -1;
+		} else {
+			printf("Something went wrong, closing connection..\n");
+			return -1;
+		}
+	}
+
+	printf("\nSending QUIT_MSG, then close connection.\n");
+	//Send(socket, QUIT_MSG, sizeof(QUIT_MSG), 0);
+	if(write(socket, QUIT_MSG, strlen(QUIT_MSG)) != strlen(QUIT_MSG)) return -1;
+	Close(socket);
+
+	return 0;
+}
